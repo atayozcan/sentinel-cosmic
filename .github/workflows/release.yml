@@ -107,7 +107,7 @@ jobs:
       #   gh attestation verify <file> --repo atayozcan/sentinel
       # Documented in SECURITY.md → Threat model → Supply-chain integrity.
       - name: Attest release artefacts
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             dist/*.deb
