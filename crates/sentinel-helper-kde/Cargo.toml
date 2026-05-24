@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2025 Atay Özcan <atay@oezcan.me>
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "sentinel-helper-kde"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "KDE Plasma-native confirmation dialog for Sentinel privilege escalation (Rust + cxx-qt + Kirigami)"
+
+[[bin]]
+name = "sentinel-helper-kde"
+path = "src/main.rs"
+
+[dependencies]
+# cxx-qt 0.8.x — the current release series, Qt 6 native.
+cxx = "1.0"
+cxx-qt = "0.8"
+cxx-qt-lib = { version = "0.8", features = ["qt_full"] }
+# QApplication lives in -extras; qqc2-desktop-style (the Breeze QtQuick
+# style) needs a QApplication (QtWidgets) rather than a bare QGuiApplication.
+cxx-qt-lib-extras = "0.8"
+rand = "0.10"
+# Shared Outcome wire enum, CLI parser, and icon-name resolution so this
+# helper is a byte-for-byte drop-in for the COSMIC `sentinel-helper`.
+sentinel-shared = { path = "../sentinel-shared", features = ["cli"] }
+
+[build-dependencies]
+cxx-qt-build = "0.8"
+
+# ---------------------------------------------------------------------------
+# openSUSE / Fedora RPM via `cargo generate-rpm`.
+# Prereq: cargo build --release -p sentinel-helper-kde
+# Then:   cargo generate-rpm -p crates/sentinel-helper-kde
+# ---------------------------------------------------------------------------
+[package.metadata.generate-rpm]
+name = "sentinel-helper-kde"
+summary = "KDE Plasma-native UAC-style confirmation dialog for Sentinel"
+license = "GPL-3.0-or-later"
+url = "https://github.com/atayozcan/sentinel"
+# QML is embedded in the binary (qrc), so the binary is the only asset.
+assets = [
+    { source = "target/release/sentinel-helper-kde", dest = "/usr/bin/sentinel-helper-kde", mode = "755" },
+]
+# dlopen / QML-loaded runtime deps; linked libQt6* libraries are detected
+# automatically from the binary.
+[package.metadata.generate-rpm.requires]
+"layer-shell-qt6" = "*"
+"layer-shell-qt6-imports" = "*"
+"kf6-kirigami-imports" = "*"
+"kf6-qqc2-desktop-style" = "*"
+"qt6-declarative-imports" = "*"
+"qt6-wayland" = "*"
+"kf6-breeze-icons" = "*"
