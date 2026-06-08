@@ -13,7 +13,7 @@ name = "pam_sentinel"
 crate-type = ["cdylib"]
 
 [dependencies]
-pam-bindings = "0.2"
+pam-bindings = "0.3"
 sentinel-shared = { path = "../sentinel-shared" }
 log.workspace = true
 nix.workspace = true
