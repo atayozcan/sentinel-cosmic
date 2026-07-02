@@ -1,8 +1,0 @@
-#!/bin/sh
-# SPDX-FileCopyrightText: 2025 Atay Özcan <atay@oezcan.me>
-# SPDX-License-Identifier: GPL-3.0-or-later
-
-# prerm — nothing to do. The XDG autostart .desktop file is removed by
-# dpkg with the rest of the package, so no manual disable step.
-set -e
-exit 0

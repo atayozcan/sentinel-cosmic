@@ -165,9 +165,11 @@ case "${1:-}" in
 esac
 
 # ---- full matrix orchestration --------------------------------------------
-command -v "$ASUS_HOST" >/dev/null 2>&1 || true
 mkdir -p "$DIST"
 c "Sentinel $VERSION — local release matrix"
+# Fail before the (long) local build if the x86_64 worker is unreachable.
+ssh -o ConnectTimeout=5 -o BatchMode=yes "$ASUS_HOST" true 2>/dev/null \
+    || die "worker $ASUS_HOST unreachable over ssh — full matrix needs it (or run --arch for this host only)"
 
 c "[1/4] aarch64 (this host)"; build_bundle; pkg_deb_rpm
 
@@ -185,4 +187,25 @@ scp -q "$ASUS_HOST:$REMOTE_REPO/dist/*aarch64*.pkg.tar.zst" "$DIST/" 2>/dev/null
 
 c "[4/4] checksums + manifest"
 ( cd "$DIST" && for f in *.pkg.tar.zst *.deb *.rpm; do [ -f "$f" ] && sha256sum "$f" > "$f.sha256"; done; ls -1 )
-c "Done. Artefacts in $DIST/. Next: scripts/release-local.sh --stage aur && gh release create v$VERSION dist/*"
+
+# The scp/ssh legs above are `|| true` (partial matrices are useful while
+# iterating), so verify the FULL matrix explicitly rather than shipping a
+# release with a silently-missing artefact.
+missing=0
+pkgrel="$(sed -n 's/^pkgrel=//p' packaging-kde/packaging/arch/PKGBUILD)"
+for f in \
+    "sentinel-kde-$VERSION-x86_64-linux.tar.gz" \
+    "sentinel-kde-$VERSION-aarch64-linux.tar.gz" \
+    "sentinel-kde-$VERSION-${pkgrel:-1}-x86_64.pkg.tar.zst" \
+    "sentinel-kde-$VERSION-${pkgrel:-1}-aarch64.pkg.tar.zst" \
+    "sentinel-kde_$VERSION-1_amd64.deb" \
+    "sentinel-kde_$VERSION-1_arm64.deb" \
+    "sentinel-kde-$VERSION-1.x86_64.rpm" \
+    "sentinel-kde-$VERSION-1.aarch64.rpm"
+do
+    [ -f "$DIST/$f" ] || { printf '\033[1;31mmissing: %s\033[0m\n' "$f" >&2; missing=1; }
+done
+[ "$missing" = 0 ] || die "release matrix incomplete — see missing artefacts above"
+
+"$0" --stage aur
+c "Done. Artefacts in $DIST/. Next: commit the PKGBUILD sums, then: gh release create v$VERSION dist/*"

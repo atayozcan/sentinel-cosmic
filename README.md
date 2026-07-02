@@ -120,14 +120,14 @@ table — bonus points for a screenshot.
 │   ├── sentinel-polkit-agent/  # bin    → /usr/lib/sentinel-polkit-agent (D-Bus bypass)
 │   └── sentinel-helper-kde/    # KDE Plasma / Kirigami (cxx-qt) frontend → /usr/lib/sentinel-helper-kde
 ├── config/                     # /etc/security/sentinel.conf, /etc/pam.d/{polkit-1,sudo}
-├── packaging/                  # backend packaging: debian, systemd, xdg-autostart, dbus, man, hyprland, FLATPAK rationale
-├── packaging-kde/              # KDE installer (install.sh/uninstall.sh: transactional, auto-rollback), PKGBUILD, packaging, scripts/build-release.sh
+├── packaging/                  # backend packaging: systemd, xdg-autostart, dbus, man, hyprland, FLATPAK rationale
+├── packaging-kde/              # KDE installer (install.sh/uninstall.sh: transactional, auto-rollback), PKGBUILD, packaging
 ├── nix/module.nix              # NixOS module
 ├── flake.nix
 ├── scripts/pam_authtest.rs     # PAM probe used by the install test harness
+├── scripts/release-local.sh    # local release matrix: bundle tarball, .pkg.tar.zst, .deb, .rpm per arch
 └── .github/workflows/
-    ├── ci.yml                  # fmt + clippy + test + build on PRs
-    └── release.yml             # tag v* → builds the KDE bundle + GH release + AUR
+    └── ci.yml                  # fmt + clippy + test + build on PRs
 ```
 
 The backend (`pam-sentinel`, `sentinel-shared`, `sentinel-polkit-agent`)

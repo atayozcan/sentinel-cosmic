@@ -80,18 +80,24 @@ clobbering of your real config).
 
 ## Building distribution packages
 
+Releases are built locally by `scripts/release-local.sh` (no CI):
+
 ```bash
-./packaging-kde/scripts/build-release.sh 0.8.0
+scripts/release-local.sh --arch $(uname -m)   # this host only: bundle + .deb + .rpm
+scripts/release-local.sh                      # full two-host matrix → dist/
 ```
 
-Produces `dist/`:
-- `sentinel-kde-0.8.0.tar.gz` (source)
-- `sentinel-kde-0.8.0-x86_64-linux.tar.gz` (binary, install layout)
-- per-arch `.sha256` files
+Per arch it emits into `dist/`: the prebuilt bundle tarball
+(`sentinel-kde-<ver>-<arch>-linux.tar.gz`), an Arch `.pkg.tar.zst`, a
+`.deb`, an `.rpm`, and `.sha256` files, reproducibly (pinned toolchain,
+`SOURCE_DATE_EPOCH`, path remapping). See the header comment in the
+script for the knobs; `--stage aur` (run automatically at the end of a
+full matrix) fills the AUR PKGBUILD's per-arch checksums.
 
-For an RPM:
+One-offs, if you just need a single package on this machine:
 ```bash
-cargo generate-rpm -p crates/sentinel-helper-kde
+cargo generate-rpm -p crates/sentinel-helper-kde   # after a release build
+cargo deb --no-build -p sentinel-helper-kde
 ```
 
 ## Shell completions and man pages
