@@ -69,7 +69,8 @@ impl ProcessInfo {
         // `policy_exe` is the program `[policy]` may match: the elevated
         // target for Paths 1/3, and `None` for the Path-2 root shell (see
         // the field docs — matching the originator there is an escalation).
-        let (exe, cmdline, remember_command, policy_exe) = if was_elevation && !stripped.is_empty() {
+        let (exe, cmdline, remember_command, policy_exe) = if was_elevation && !stripped.is_empty()
+        {
             // Path 1: elevation wrapper with a target. The remember grant
             // binds to the FULL elevated command, so `sudo pacman -Syu`
             // can't later authorize `sudo pacman -U /tmp/evil`.
