@@ -663,6 +663,8 @@ const ELEVATION_FLAGS_WITH_VALUE: &[&str] = &[
     "-r",
     "--other-user",
     "-U",
+    "--chroot",
+    "-R",
 ];
 
 /// Strip an elevation tool's `argv[0]` and any of its option flags
@@ -1638,6 +1640,21 @@ mod tests {
         assert_eq!(
             strip_elevation_prefix("sudo --user root --group docker docker ps"),
             "docker ps"
+        );
+    }
+
+    #[test]
+    fn strip_elevation_skips_chroot_value() {
+        // `-R`/`--chroot` take a directory value. If the value flag isn't
+        // recognised, the directory is mistaken for the command — the
+        // dialog then shows `/srv` and a `deny = ["pacman"]` is evaded.
+        assert_eq!(
+            strip_elevation_prefix("sudo -R /srv pacman -U /tmp/x"),
+            "pacman -U /tmp/x"
+        );
+        assert_eq!(
+            strip_elevation_prefix("sudo --chroot /srv systemctl restart foo"),
+            "systemctl restart foo"
         );
     }
 

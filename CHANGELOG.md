@@ -19,6 +19,28 @@ following [Semantic Versioning](https://semver.org/).
   `sudo -v` cred-cache prompt pretended to be rememberable. The PAM path
   now collapses the window to `0` exactly like the polkit path already
   did.
+- **`[policy] allow` can no longer be tricked into passwordlessly
+  granting a root shell.** For a bare-elevation request (`sudo -i`/`-s`/
+  `-v`, `su`) the dialog shows the *originating* tool (e.g. `topgrade`),
+  but policy now matches on a separate `policy_exe` that is unset for
+  those requests, so an `allow = ["topgrade"]` entry no longer matches
+  the root shell that tool spawns — such requests always go to the
+  dialog.
+- **`sudo -R`/`--chroot <dir>` is parsed correctly.** The chroot
+  directory was previously mistaken for the elevated command, so the
+  dialog showed the wrong program and a `deny` entry could be evaded.
+- **Remember grants are no longer keyed on the `u32::MAX` "no audit
+  session" sentinel.** Two sessions that both lack a loginuid/sessionid
+  could otherwise collide on one grant; such requests are now never
+  remembered, matching the documented contract.
+- **polkit path: the confirmation dialog is killed on cancel and bounded
+  by a timeout.** `CancelAuthentication` no longer orphans the dialog on
+  screen, and a wedged helper can't block every future auth by holding
+  the agent's serialization guard forever.
+- **polkit path: a `CancelAuthentication` racing session startup now
+  aborts it reliably** (the session handle is registered before the task
+  can run), and a pre-approval left behind by a failed `helper-1` hand-off
+  is dropped so a later auth can't claim it.
 
 ### Added
 

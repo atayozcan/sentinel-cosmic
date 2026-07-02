@@ -31,6 +31,16 @@ pub struct ProcessInfo {
     /// just the program name — is what stops a grant for `pacman -Syu`
     /// from authorizing `pacman -U /tmp/evil`.
     pub remember_command: Option<String>,
+    /// The program name `[policy]` allow/deny should match against, or
+    /// `None` when there is no safe target to match. This equals `exe`
+    /// for a normal process (Path 3) and for an elevation wrapper with a
+    /// concrete target (Path 1, the elevated program). It is deliberately
+    /// `None` for a **bare-elevation root shell** (`sudo -i`/`-s`/`-v`,
+    /// `su`): there `exe` is the *originating* tool (e.g. `topgrade`,
+    /// `paru`), NOT the elevated target, so matching a `[policy] allow`
+    /// against it would passwordlessly grant a root shell to whatever
+    /// launched sudo. `None` forces such requests to the dialog.
+    pub policy_exe: Option<String>,
 }
 
 impl ProcessInfo {
@@ -56,7 +66,10 @@ impl ProcessInfo {
         //    something else). Use the binary's own /proc info as-is.
         let stripped = strip_elevation_prefix(&raw_cmdline);
         let was_elevation = !raw_cmdline.is_empty() && stripped != raw_cmdline;
-        let (exe, cmdline, remember_command) = if was_elevation && !stripped.is_empty() {
+        // `policy_exe` is the program `[policy]` may match: the elevated
+        // target for Paths 1/3, and `None` for the Path-2 root shell (see
+        // the field docs — matching the originator there is an escalation).
+        let (exe, cmdline, remember_command, policy_exe) = if was_elevation && !stripped.is_empty() {
             // Path 1: elevation wrapper with a target. The remember grant
             // binds to the FULL elevated command, so `sudo pacman -Syu`
             // can't later authorize `sudo pacman -U /tmp/evil`.
@@ -66,26 +79,30 @@ impl ProcessInfo {
                 .unwrap_or("unknown")
                 .to_string();
             let remember = remember_command_for(&stripped);
-            (target_exe, stripped, remember)
+            let policy_exe = Some(target_exe.clone());
+            (target_exe, stripped, remember, policy_exe)
         } else if was_elevation {
             // Path 2: elevation wrapper with NO target (`sudo -s`/`-i`/
             // `-v`, `su`). That's an interactive root shell / cred cache
             // — NEVER remembered (a grant would silently re-open root).
-            // Display still walks up to the user-facing originator.
+            // Display still walks up to the user-facing originator, but
+            // `policy_exe` is None: the originator is NOT the elevated
+            // target, so `[policy] allow` must not match it.
             let parent = procfs::read_ppid(pid).and_then(|ppid| {
                 let pexe = procfs::read_exe(ppid)?;
                 let pcmdline = procfs::read_cmdline(ppid).unwrap_or_default();
                 Some((pexe, pcmdline))
             });
             match parent {
-                Some((pexe, pcmdline)) => (pexe, pcmdline, None),
-                None => (raw_exe, raw_cmdline, None),
+                Some((pexe, pcmdline)) => (pexe, pcmdline, None, None),
+                None => (raw_exe, raw_cmdline, None, None),
             }
         } else {
             // Path 3: not an elevation tool. Remember binds to the
             // process's own full cmdline (still subject to the carve-out).
             let remember = remember_command_for(&raw_cmdline);
-            (raw_exe, raw_cmdline, remember)
+            let policy_exe = Some(raw_exe.clone());
+            (raw_exe, raw_cmdline, remember, policy_exe)
         };
 
         Self {
@@ -97,6 +114,7 @@ impl ProcessInfo {
             cmdline,
             cwd: procfs::read_cwd(pid).unwrap_or_default(),
             remember_command,
+            policy_exe,
         }
     }
 }

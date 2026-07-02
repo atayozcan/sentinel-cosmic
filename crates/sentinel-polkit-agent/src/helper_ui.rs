@@ -8,11 +8,18 @@
 
 use sentinel_shared::{POLKIT_PAM_SERVICE, ServiceConfig, Verdict, format_message};
 use std::process::Stdio;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 const HELPER_PATH: &str = env!("SENTINEL_HELPER_PATH");
+
+/// Slack added on top of the helper's own auto-deny timeout before the
+/// agent gives up and kills it. The helper races us to its own deadline;
+/// this lets its verdict land even if its clock ticks slightly after
+/// ours. Mirrors `pam-sentinel`'s `HELPER_GRACE_SECS`.
+const HELPER_GRACE_SECS: u64 = 5;
 
 #[derive(Debug, Error)]
 pub enum HelperError {
@@ -20,6 +27,8 @@ pub enum HelperError {
     Spawn(#[source] std::io::Error),
     #[error("helper produced no verdict")]
     NoOutput,
+    #[error("helper timed out")]
+    Timeout,
     #[error("helper i/o: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -178,19 +187,39 @@ pub async fn run(req: Request) -> Result<Verdict, HelperError> {
     }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::null())
+        // If this future is dropped — e.g. `CancelAuthentication` aborts
+        // the session task — kill the dialog instead of orphaning it on
+        // screen for an action polkit has already retracted.
+        .kill_on_drop(true);
 
     let mut child = cmd.spawn().map_err(HelperError::Spawn)?;
     let stdout = child.stdout.take().expect("piped stdout");
     let mut lines = BufReader::new(stdout).lines();
 
-    let mut verdict: Option<Verdict> = None;
-    while let Some(line) = lines.next_line().await? {
-        if let Ok(v) = line.parse::<Verdict>() {
-            verdict = Some(v);
-            break;
+    let read_verdict = async {
+        while let Some(line) = lines.next_line().await? {
+            if let Ok(v) = line.parse::<Verdict>() {
+                return Ok::<Option<Verdict>, HelperError>(Some(v));
+            }
         }
-    }
+        Ok(None)
+    };
+
+    // Bound the wait so a wedged helper can't block forever while we hold
+    // the agent's `inflight` guard (which would deadlock every later
+    // auth). `timeout = 0` means "no auto-deny — wait as long as it
+    // takes", so we only cap when the helper itself has a deadline.
+    let verdict = if req.timeout > 0 {
+        let deadline = Duration::from_secs(req.timeout + HELPER_GRACE_SECS);
+        match tokio::time::timeout(deadline, read_verdict).await {
+            Ok(res) => res?,
+            // Drop `child` here → kill_on_drop reaps the wedged helper.
+            Err(_) => return Err(HelperError::Timeout),
+        }
+    } else {
+        read_verdict.await?
+    };
 
     let _ = child.wait().await;
     verdict.ok_or(HelperError::NoOutput)

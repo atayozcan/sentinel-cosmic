@@ -106,16 +106,28 @@ impl PamHooks for PamSentinel {
         // (always dialog, never record). Fail-closed: an unreachable broker
         // means "show the dialog", never "let in".
         let ppid = getppid();
-        let remember_key = process
-            .remember_command
-            .as_deref()
-            .map(|command| RememberKey {
-                loginuid: read_proc_u32(ppid, "loginuid"),
-                sessionid: read_proc_u32(ppid, "sessionid"),
-                service: service.clone(),
-                command: sentinel_shared::remember_key_command(command, cfg.remember_scope)
-                    .to_string(),
-            });
+        let loginuid = read_proc_u32(ppid, "loginuid");
+        let sessionid = read_proc_u32(ppid, "sessionid");
+        // A request with no audit session leaves loginuid/sessionid at the
+        // kernel's `u32::MAX` "unset" sentinel. Never key a grant on the
+        // sentinel: two distinct sessions that both lack an audit id would
+        // otherwise collide on `{MAX, MAX, service, command}`, letting a
+        // grant made in one auto-allow the other. No session ⇒ never
+        // remembered (matches the documented contract).
+        let remember_key = if loginuid == u32::MAX || sessionid == u32::MAX {
+            None
+        } else {
+            process
+                .remember_command
+                .as_deref()
+                .map(|command| RememberKey {
+                    loginuid,
+                    sessionid,
+                    service: service.clone(),
+                    command: sentinel_shared::remember_key_command(command, cfg.remember_scope)
+                        .to_string(),
+                })
+        };
         if cfg.remember_seconds > 0 {
             if let Some(key) = &remember_key {
                 if broker_client::check_remember(key.clone(), cfg.remember_seconds) {
@@ -277,7 +289,12 @@ fn check_policy(
     process: &ProcessInfo,
     requesting_uid: u32,
 ) -> Option<PamResultCode> {
-    let (event, rc) = match cfg.policy.decide(Some(&process.exe), None) {
+    // Match on `policy_exe`, not the display `exe`: for a bare-elevation
+    // root shell the two differ (`exe` is the originating tool), and
+    // `policy_exe` is `None` there so a `[policy] allow` can't be tricked
+    // into passwordlessly granting a root shell. `decide(None, None)`
+    // matches nothing → `Ask` → dialog.
+    let (event, rc) = match cfg.policy.decide(process.policy_exe.as_deref(), None) {
         PolicyDecision::Allow => ("auth.allow", PamResultCode::PAM_SUCCESS),
         PolicyDecision::Deny => ("auth.deny", PamResultCode::PAM_AUTH_ERR),
         PolicyDecision::Ask => return None,
@@ -443,4 +460,47 @@ fn read_proc_u32(ppid: i32, field: &str) -> u32 {
         return v;
     }
     u32::MAX
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proc(exe: &str, policy_exe: Option<&str>) -> ProcessInfo {
+        ProcessInfo {
+            name: exe.into(),
+            exe: exe.into(),
+            cmdline: String::new(),
+            cwd: String::new(),
+            remember_command: None,
+            policy_exe: policy_exe.map(str::to_owned),
+        }
+    }
+
+    fn cfg_allow(prog: &str) -> ServiceConfig {
+        let mut cfg = sentinel_shared::Document::defaults().for_service("sudo");
+        cfg.policy.allow = vec![prog.to_string()];
+        // Keep the test off the syslog/proc-read path.
+        cfg.log_attempts = false;
+        cfg
+    }
+
+    #[test]
+    fn policy_allow_does_not_match_bare_elevation_originator() {
+        // The H2 regression: a bare-elevation root shell displays the
+        // originating tool (e.g. `topgrade`) as `exe`, but `policy_exe`
+        // is None. An `allow = ["topgrade"]` must NOT passwordlessly grant
+        // that root shell — it must fall through to the dialog.
+        let cfg = cfg_allow("topgrade");
+        let bare = proc("topgrade", None);
+        assert_eq!(check_policy(&cfg, "sudo", "root", &bare, 1000), None);
+
+        // Sanity: when the elevated target really IS the allowed program
+        // (policy_exe = Some), the allow still short-circuits as intended.
+        let real = proc("topgrade", Some("topgrade"));
+        assert_eq!(
+            check_policy(&cfg, "sudo", "root", &real, 1000),
+            Some(PamResultCode::PAM_SUCCESS)
+        );
+    }
 }

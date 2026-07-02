@@ -181,31 +181,34 @@ impl Agent {
         let (done_tx, done_rx) = oneshot::channel::<()>();
 
         let remember = self.remember.clone();
-        let handle = tokio::spawn(async move {
-            let _ = session::run(
-                queue,
-                remember,
-                AuthInputs {
-                    action_id: &action_for_task,
-                    cookie: &cookie_for_task,
-                    username: &username,
-                    cfg: &cfg,
-                    process_exe: exe_for_task.as_deref(),
-                    process_cmdline: cmdline_for_task.as_deref(),
-                    process_pid: subject_pid,
-                    process_cwd: cwd_for_task.as_deref(),
-                    requesting_user: Some(&username_for_task),
-                },
-            )
-            .await;
-            let _ = done_tx.send(());
-        });
-
-        // Insert and KEEP the handle in the map for the duration of
-        // the auth — that's what makes CancelAuthentication able to
-        // actually abort us.
+        // Spawn while holding the `sessions` lock and insert the handle
+        // before releasing it, so a `CancelAuthentication` racing in
+        // can't slip between `spawn` and `insert` — find no entry — and
+        // silently fail to abort us. (The spawned task never locks
+        // `sessions` itself, so this can't deadlock.)
         {
             let mut sessions = self.sessions.lock().await;
+            let handle = tokio::spawn(async move {
+                let _ = session::run(
+                    queue,
+                    remember,
+                    AuthInputs {
+                        action_id: &action_for_task,
+                        cookie: &cookie_for_task,
+                        username: &username,
+                        cfg: &cfg,
+                        process_exe: exe_for_task.as_deref(),
+                        process_cmdline: cmdline_for_task.as_deref(),
+                        process_pid: subject_pid,
+                        process_cwd: cwd_for_task.as_deref(),
+                        requesting_user: Some(&username_for_task),
+                    },
+                )
+                .await;
+                let _ = done_tx.send(());
+            });
+            // KEEP the handle in the map for the duration of the auth —
+            // that's what makes CancelAuthentication able to abort us.
             sessions.insert(cookie.clone(), handle);
         }
 

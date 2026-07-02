@@ -203,7 +203,9 @@ fn parent_wait(child: Pid, read_fd: OwnedFd, req: &HelperRequest<'_>) -> Result<
         return Err("helper timeout".into());
     }
 
-    // Maximum legitimate output is "TIMEOUT\n" = 8 bytes; 16 leaves 2× margin.
+    // Longest legitimate verdict is "ALLOW REMEMBER\n" = 15 bytes; 16
+    // holds it with the newline. Anything longer is malformed → parsed
+    // as Deny below (fail-safe).
     let mut buf = [0u8; 16];
     let read_n = match read_pipe(&read_fd, &mut buf) {
         Ok(n) => n,

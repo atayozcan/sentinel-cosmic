@@ -93,6 +93,10 @@ pub async fn run(
             .await
             .context("run polkit-agent-helper-1")?;
             if !success {
+                // helper-1 didn't consume the pre-approval; drop it so a
+                // later auth can't claim this leftover within its TTL and
+                // be audited under this action's id.
+                queue.drain().await;
                 warn!(
                     "event=auth.error source=agent.helper1 action={} note=\"helper-1 reported FAILURE — PAM stack rejected policy approval?\"",
                     q(inputs.action_id)
@@ -151,6 +155,10 @@ pub async fn run(
         })
         .await
         .context("run polkit-agent-helper-1")?;
+        if !success {
+            // helper-1 didn't consume the pre-approval; drop the leftover.
+            queue.drain().await;
+        }
         return Ok(success);
     }
 
@@ -253,6 +261,9 @@ pub async fn run(
     .context("run polkit-agent-helper-1")?;
 
     if !success {
+        // helper-1 didn't consume the pre-approval; drop the leftover so
+        // the next auth can't claim it within its TTL.
+        queue.drain().await;
         warn!(
             "event=auth.error source=agent.helper1 action={} note=\"helper-1 reported FAILURE — PAM stack rejected approval?\"",
             q(inputs.action_id)
