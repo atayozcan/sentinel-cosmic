@@ -10,6 +10,26 @@ following [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The "remember" checkbox is no longer offered for requests that can
+  never be remembered** (`sudo -v`, `su`, shells and other ineligible
+  gateways) on the terminal path. Previously the dialog showed the
+  checkbox but the tick was silently dropped — e.g. topgrade's leading
+  `sudo -v` cred-cache prompt pretended to be rememberable. The PAM path
+  now collapses the window to `0` exactly like the polkit path already
+  did.
+
+### Added
+
+- **`remember_scope = "command" | "program"`** (`[general]` or per
+  service): opt-in granularity for remember grants. The default
+  (`"command"`) keeps the full-command binding; `"program"` binds a
+  grant to the program token only, so multi-command tools (topgrade's
+  `zypper refresh` + `zypper dist-upgrade`) prompt once per window
+  instead of once per distinct command line. Shell/interpreter
+  exclusions and session binding are unchanged.
+
 ## [0.13.0] — 2026-06-27
 
 KDE-only. The COSMIC frontend is removed — Sentinel now ships a single KDE

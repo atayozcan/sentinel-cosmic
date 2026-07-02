@@ -257,6 +257,14 @@ pub struct General {
     /// and the timestamp store in `pam-sentinel` for the security model.
     #[serde(default = "default_remember_seconds")]
     pub remember_seconds: u32,
+    /// Granularity of a remember grant — see [`RememberScope`]. The
+    /// default (`"command"`) binds the grant to the full elevated
+    /// command; `"program"` binds it to the program only, so one tick
+    /// covers different invocations of the same tool (e.g. topgrade's
+    /// `zypper refresh` + `zypper dist-upgrade`). Program scope trades
+    /// away the argv binding — opt in knowingly.
+    #[serde(default)]
+    pub remember_scope: RememberScope,
 }
 
 impl Default for General {
@@ -270,6 +278,7 @@ impl Default for General {
             log_attempts: true,
             min_display_time_ms: default_min_display_time(),
             remember_seconds: default_remember_seconds(),
+            remember_scope: RememberScope::default(),
         }
     }
 }
@@ -341,6 +350,9 @@ pub struct ServiceOverride {
     /// the remember window, or `0` to force a service off. Hard-capped
     /// at 900s downstream.
     pub remember_seconds: Option<u32>,
+    /// Per-service override of `[general].remember_scope` — see
+    /// [`RememberScope`]. `None` inherits the general value.
+    pub remember_scope: Option<RememberScope>,
 }
 
 /// What a [`Policy`] match resolves to for a given request.
@@ -450,6 +462,9 @@ pub struct ServiceConfig {
     /// inherits `[general].remember_seconds`; terminal paths default to
     /// `0` unless opted in via `[services.<name>].remember_seconds`.
     pub remember_seconds: u32,
+    /// Granularity of a remember grant (`[general].remember_scope`,
+    /// per-service overridable). See [`RememberScope`].
+    pub remember_scope: RememberScope,
 }
 
 impl Document {
@@ -496,6 +511,7 @@ impl Document {
             } else {
                 0
             },
+            remember_scope: self.general.remember_scope,
         };
         if let Some(over) = self.services.get(service) {
             if let Some(v) = over.enabled {
@@ -509,6 +525,9 @@ impl Document {
             }
             if let Some(v) = over.remember_seconds {
                 cfg.remember_seconds = v;
+            }
+            if let Some(v) = over.remember_scope {
+                cfg.remember_scope = v;
             }
         }
         cfg
@@ -740,6 +759,36 @@ pub fn remember_eligible_command(cmd: &str) -> bool {
     };
     let base = process_basename(first).unwrap_or(first);
     !REMEMBER_INELIGIBLE.contains(&base)
+}
+
+/// Granularity of a "remember" grant (`remember_scope` in the config).
+///
+/// `Command` (the default) binds the grant to the **full** elevated
+/// command, args included — a grant for `pacman -Syu` never covers
+/// `pacman -U /tmp/evil`. `Program` binds it to the leading program
+/// token only, so one tick covers *any* invocation of that program for
+/// the window (topgrade's `zypper refresh` + `zypper dist-upgrade`
+/// become one prompt). Program scope deliberately gives up the argv
+/// binding; [`REMEMBER_INELIGIBLE`] still applies either way, and the
+/// grant stays bound to the login session and service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RememberScope {
+    #[default]
+    Command,
+    Program,
+}
+
+/// The command string a remember grant is keyed on, per `scope`. Callers
+/// pass an eligibility-vetted full command ([`remember_eligible_command`]);
+/// this only narrows it for [`RememberScope::Program`]. The token is used
+/// verbatim (no basename normalization): `/usr/bin/zypper` and `zypper`
+/// are distinct keys, which errs toward re-prompting.
+pub fn remember_key_command(command: &str, scope: RememberScope) -> &str {
+    match scope {
+        RememberScope::Command => command.trim(),
+        RememberScope::Program => command.split_whitespace().next().unwrap_or(""),
+    }
 }
 
 /// Generic shield icon shown when the requesting binary's basename has
@@ -1224,6 +1273,7 @@ mod tests {
                 timeout: Some(99),
                 randomize: Some(false),
                 remember_seconds: None,
+                remember_scope: None,
             },
         );
         let doc = doc_with_services(services);
@@ -1243,6 +1293,7 @@ mod tests {
                 timeout: None,
                 randomize: None,
                 remember_seconds: None,
+                remember_scope: None,
             },
         );
         let doc = doc_with_services(services);
@@ -1262,6 +1313,7 @@ mod tests {
                 timeout: Some(1),
                 randomize: Some(false),
                 remember_seconds: None,
+                remember_scope: None,
             },
         );
         let doc = doc_with_services(services);
@@ -1298,6 +1350,7 @@ mod tests {
             "sudo".to_string(),
             ServiceOverride {
                 remember_seconds: Some(60),
+                remember_scope: None,
                 ..Default::default()
             },
         );
@@ -1314,6 +1367,7 @@ mod tests {
             POLKIT_PAM_SERVICE.to_string(),
             ServiceOverride {
                 remember_seconds: Some(0),
+                remember_scope: None,
                 ..Default::default()
             },
         );
@@ -1674,6 +1728,73 @@ mod tests {
     fn remember_eligible_rejects_empty() {
         assert!(!remember_eligible_command(""));
         assert!(!remember_eligible_command("   "));
+    }
+
+    // ---- remember_key_command / remember_scope ---------------------------
+
+    #[test]
+    fn remember_key_command_scopes() {
+        // Default scope: the full command, trimmed.
+        assert_eq!(
+            remember_key_command(" zypper dist-upgrade ", RememberScope::Command),
+            "zypper dist-upgrade"
+        );
+        // Program scope: leading token only, so `zypper refresh` and
+        // `zypper dist-upgrade` share one grant (the topgrade case).
+        assert_eq!(
+            remember_key_command("zypper dist-upgrade", RememberScope::Program),
+            "zypper"
+        );
+        assert_eq!(
+            remember_key_command("zypper refresh", RememberScope::Program),
+            "zypper"
+        );
+        // Verbatim token: path and bare name stay distinct keys.
+        assert_eq!(
+            remember_key_command("/usr/bin/zypper ref", RememberScope::Program),
+            "/usr/bin/zypper"
+        );
+        assert_eq!(remember_key_command("", RememberScope::Program), "");
+    }
+
+    #[test]
+    fn remember_scope_parses_and_inherits() {
+        // Default is per-command.
+        let doc: Document = toml::from_str("[general]\n").expect("parse");
+        assert_eq!(doc.general.remember_scope, RememberScope::Command);
+        assert_eq!(
+            doc.for_service("sudo").remember_scope,
+            RememberScope::Command
+        );
+
+        // [general] value inherits into every service…
+        let doc: Document =
+            toml::from_str("[general]\nremember_scope = \"program\"\n").expect("parse");
+        assert_eq!(
+            doc.for_service("sudo").remember_scope,
+            RememberScope::Program
+        );
+        assert_eq!(
+            doc.for_service(POLKIT_PAM_SERVICE).remember_scope,
+            RememberScope::Program
+        );
+
+        // …and a per-service override wins over [general].
+        let doc: Document = toml::from_str(
+            "[general]\nremember_scope = \"program\"\n[services.sudo]\nremember_scope = \"command\"\n",
+        )
+        .expect("parse");
+        assert_eq!(
+            doc.for_service("sudo").remember_scope,
+            RememberScope::Command
+        );
+        assert_eq!(
+            doc.for_service(POLKIT_PAM_SERVICE).remember_scope,
+            RememberScope::Program
+        );
+
+        // A typo'd value is a loud parse error, not a silent default.
+        assert!(toml::from_str::<Document>("[general]\nremember_scope = \"prgram\"\n").is_err());
     }
 
     #[test]

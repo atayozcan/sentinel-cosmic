@@ -36,6 +36,12 @@ pub struct HelperRequest<'a> {
     pub sound_name: &'a str,
     pub target_uid: u32,
     pub requesting_pid: i32,
+    /// Effective remember window for THIS request: `0` (checkbox hidden)
+    /// when the request is not rememberable (`sudo -v`, `su`, ineligible
+    /// gateway), `cfg.remember_seconds` otherwise. Not read from `cfg`
+    /// so the checkbox can never be offered when a tick has nowhere to
+    /// be recorded.
+    pub remember_secs: u32,
 }
 
 // `fork(2)` is unavoidably `unsafe`; contained here (crate is
@@ -122,7 +128,7 @@ fn child_exec(req: &HelperRequest<'_>, write_fd: OwnedFd) -> ! {
     push(&mut argv, "--min-time");
     push(&mut argv, &req.cfg.min_display_time_ms.to_string());
     push(&mut argv, "--remember-secs");
-    push(&mut argv, &req.cfg.remember_seconds.to_string());
+    push(&mut argv, &req.remember_secs.to_string());
     if !req.sound_name.is_empty() {
         push(&mut argv, "--sound-name");
         push(&mut argv, req.sound_name);

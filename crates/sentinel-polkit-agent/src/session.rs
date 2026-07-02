@@ -116,6 +116,10 @@ pub async fn run(
     } else {
         0
     };
+    // Grant key per the configured scope: the full command (default) or
+    // just the program token (`remember_scope = "program"`, opt-in).
+    let remember_command =
+        sentinel_shared::remember_key_command(remember_command, inputs.cfg.remember_scope);
 
     // In-memory "remember" cache (the polkit-path complement to the root
     // timestamp store, which the PAM module owns for sudo/su). A fresh

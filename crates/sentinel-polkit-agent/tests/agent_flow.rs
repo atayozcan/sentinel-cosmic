@@ -46,6 +46,7 @@ fn cfg() -> ServiceConfig {
         notify_on_deny: false,
         notify_on_timeout: false,
         remember_seconds: 0,
+        remember_scope: sentinel_shared::RememberScope::Command,
     }
 }
 

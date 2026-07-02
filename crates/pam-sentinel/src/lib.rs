@@ -113,7 +113,8 @@ impl PamHooks for PamSentinel {
                 loginuid: read_proc_u32(ppid, "loginuid"),
                 sessionid: read_proc_u32(ppid, "sessionid"),
                 service: service.clone(),
-                command: command.to_string(),
+                command: sentinel_shared::remember_key_command(command, cfg.remember_scope)
+                    .to_string(),
             });
         if cfg.remember_seconds > 0 {
             if let Some(key) = &remember_key {
@@ -133,13 +134,29 @@ impl PamHooks for PamSentinel {
             }
         }
 
-        let (rc, remember) =
-            spawn_dialog(&cfg, &service, &user, &process, process_pid, requesting_uid);
+        // Offer the "remember" checkbox only when a tick can actually be
+        // recorded: a non-rememberable request (`sudo -v`, `su`, an
+        // ineligible gateway) has no key, so showing the checkbox would
+        // be a lie the user discovers on the next prompt.
+        let remember_secs = if remember_key.is_some() {
+            cfg.remember_seconds
+        } else {
+            0
+        };
+        let (rc, remember) = spawn_dialog(
+            &cfg,
+            &service,
+            &user,
+            &process,
+            process_pid,
+            requesting_uid,
+            remember_secs,
+        );
         // Record the grant only when the user ticked the "remember"
         // checkbox (the helper sets this on an opt-in Allow), not on every
         // allow. `remember_seconds == 0` hides the checkbox, and a
         // non-rememberable request has no key, so neither can record.
-        if remember && cfg.remember_seconds > 0 {
+        if remember && remember_secs > 0 {
             if let Some(key) = remember_key {
                 broker_client::record_remember(key);
             }
@@ -287,6 +304,7 @@ fn spawn_dialog(
     process: &ProcessInfo,
     requesting_pid: i32,
     requesting_uid: u32,
+    remember_secs: u32,
 ) -> (PamResultCode, bool) {
     let formatted_title = format_message(&cfg.title, user, service, &process.name);
     let formatted_message = format_message(&cfg.message, user, service, &process.name);
@@ -303,6 +321,7 @@ fn spawn_dialog(
         sound_name: &cfg.sound_name,
         target_uid: requesting_uid,
         requesting_pid,
+        remember_secs,
     };
 
     let dialog_started = Instant::now();

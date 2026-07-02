@@ -20,6 +20,7 @@ own `timeout` to zero.
 | `log_attempts` | bool | `true` | Log every allow/deny/timeout to syslog (`auth.info`). |
 | `min_display_time_ms` | uint | `500` | Disable the Allow button for this many ms after the dialog appears, blocking instant scripted clicks. |
 | `remember_seconds` | uint | `300` | "Remember" window for the **polkit/GUI path**. The dialog shows a **"Remember for N min" checkbox** by default; tick it and Allow to let repeat requests from the **same login session** skip the dialog for this many seconds. **Both paths key the grant on the `action`/service + the full command**, so it never covers a different command. `0` hides the checkbox; hard-capped at `900`. Terminal `sudo`/`su` have a *compiled* default of `0`, but the **shipped config opts them into `300`**. See [below](#remember-window). |
+| `remember_scope` | enum | `"command"` | Granularity of a remember grant. `"command"` binds it to the **full command line** (args included). `"program"` binds it to the **program only**, so one tick covers different invocations of the same tool — e.g. topgrade's `sudo zypper refresh` + `sudo zypper dist-upgrade` become one prompt. Program scope gives up the argument binding (a remembered `pacman` also covers `pacman -U /tmp/evil` for the window) — opt in knowingly. Shells/interpreters stay excluded either way. Per-service overridable. |
 
 <a id="remember-window"></a>
 **The remember window** is a `sudo`-timestamp analogue. The opt-in
@@ -60,6 +61,15 @@ action (`org.freedesktop.policykit.exec`, "run any command as root") is
 remembered **per command** — `pkexec id` only ever auto-allows
 `pkexec id`, never `pkexec rm …`. (Earlier versions excluded pkexec
 entirely because the key was command-blind; that is fixed.)
+
+**Multi-command tools (topgrade, update scripts).** Full-command binding
+means a runner that issues *several different* elevated commands prompts
+once per distinct command — remembering `sudo zypper refresh` cannot
+cover the `sudo zypper dist-upgrade` that follows. If you'd rather one
+tick cover the whole tool, set `remember_scope = "program"` (globally in
+`[general]` or just for one service, e.g. `[services.sudo]`): the grant
+then binds to the program token instead of the full command line. The
+trade-off is spelled out in the table above.
 
 > **polkit's own caching is separate.** Actions whose policy uses
 > `auth_admin_keep`/`auth_self_keep` are cached by **polkit itself** for
@@ -113,11 +123,12 @@ A request with no audit session is never remembered.
 ### `[services.<name>]`
 
 Per-PAM-service overrides. The overridable keys are `enabled`,
-`timeout`, `randomize`, and `remember_seconds`. Unknown keys are a
-**parse error** (a typo fails loudly rather than being silently
-dropped). Omitted keys inherit from `[general]` — **except
-`remember_seconds`**, which inherits `[general].remember_seconds` only
-for `polkit-1` and defaults to `0` (off) for terminal services; see the
+`timeout`, `randomize`, `remember_seconds`, and `remember_scope`.
+Unknown keys are a **parse error** (a typo fails loudly rather than
+being silently dropped). Omitted keys inherit from `[general]` —
+**except `remember_seconds`**, which inherits
+`[general].remember_seconds` only for `polkit-1` and defaults to `0`
+(off) for terminal services; see the
 [remember window](#remember-window).
 
 ```toml
