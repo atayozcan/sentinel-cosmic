@@ -13,6 +13,11 @@
   kf6-kirigami-imports kf6-qqc2-desktop-style layer-shell-qt6-imports
   qt6-wayland`; Arch: `qt6-base qt6-declarative kirigami
   layer-shell-qt`). It links with `mold`.
+  - cxx-qt-build **0.9** no longer auto-discovers Qt: set `QMAKE` to
+    your system `qmake6` when building the helper, e.g.
+    `QMAKE=$(command -v qmake6) cargo build -p sentinel-helper-kde`.
+    The `install.sh` and `scripts/release-local.sh` build paths detect
+    it automatically.
 
 ## Building
 
@@ -24,7 +29,8 @@ git clone https://github.com/atayoez/sentinel
 cd sentinel
 
 cargo build --release --locked                          # backend only (no Qt)
-cargo build --release --locked -p sentinel-helper-kde   # + KDE frontend
+QMAKE=$(command -v qmake6) \
+  cargo build --release --locked -p sentinel-helper-kde # + KDE frontend
 # `--workspace` builds everything, including the Qt-based KDE helper.
 ```
 

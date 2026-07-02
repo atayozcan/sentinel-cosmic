@@ -50,6 +50,9 @@ setup_repro_env() {
     export SOURCE_DATE_EPOCH="$(git -C "$REPO_ROOT" log -1 --format=%ct)"
     export SENTINEL_PREFIX=/usr SENTINEL_SYSCONFDIR=/etc SENTINEL_LIBEXECDIR=lib
     export SENTINEL_HELPER_PATH=/usr/lib/sentinel-helper-kde
+    # cxx-qt-build 0.9 needs QMAKE pointed at the system qmake6 (it no longer
+    # auto-discovers Qt). Detect it once; a build without Qt fails loudly.
+    export QMAKE="${QMAKE:-$(command -v qmake6 || command -v qmake-qt6 || command -v qmake || true)}"
     # Strip machine-specific paths from the binaries for reproducibility.
     local remap="--remap-path-prefix=$HOME=/ --remap-path-prefix=$REPO_ROOT=/src"
     local linker target_cpu=""

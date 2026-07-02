@@ -265,9 +265,14 @@ if [[ $FORCE_BUILD -eq 0 ]] && artifacts_present; then
     step "Using existing target/release artifacts (pass --rebuild to force a build)."
 else
     step "Building (cargo --release)${BUILD_USER:+ as $BUILD_USER}…"
+    # cxx-qt-build 0.9 needs QMAKE pointed at the system qmake6 (it no longer
+    # auto-discovers Qt). Detect it so the helper crate compiles; harmless for
+    # the pure-Rust crates.
+    QMAKE_BIN="${QMAKE:-$(command -v qmake6 || command -v qmake-qt6 || command -v qmake || true)}"
     build_cmd=(env
         SENTINEL_PREFIX="$PREFIX" SENTINEL_SYSCONFDIR="$SYSCONFDIR"
         SENTINEL_LIBEXECDIR="$LIBEXECDIR" SENTINEL_HELPER_PATH="$HELPER_PATH"
+        QMAKE="$QMAKE_BIN"
         cargo build --release --locked "${BUILD_CRATES[@]}")
     if [[ -n "$BUILD_USER" ]] && command -v runuser >/dev/null 2>&1; then
         runuser -u "$BUILD_USER" -- "${build_cmd[@]}"

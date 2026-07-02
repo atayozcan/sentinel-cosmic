@@ -15,20 +15,20 @@ name = "sentinel-helper-kde"
 path = "src/main.rs"
 
 [dependencies]
-# cxx-qt 0.8.x — the current release series, Qt 6 native.
+# cxx-qt 0.9.x — Qt 6 native.
 cxx = "1.0"
-cxx-qt = "0.8"
-cxx-qt-lib = { version = "0.8", features = ["qt_full"] }
+cxx-qt = "0.9"
+cxx-qt-lib = { version = "0.9", features = ["qt_full"] }
 # QApplication lives in -extras; qqc2-desktop-style (the Breeze QtQuick
 # style) needs a QApplication (QtWidgets) rather than a bare QGuiApplication.
-cxx-qt-lib-extras = "0.8"
+cxx-qt-lib-extras = "0.9"
 rand = "0.10"
 # Shared Outcome wire enum, CLI parser, and icon-name resolution so the
 # helper, PAM module, and polkit agent agree on the invocation contract.
 sentinel-shared = { path = "../sentinel-shared", features = ["cli"] }
 
 [build-dependencies]
-cxx-qt-build = "0.8"
+cxx-qt-build = "0.9"
 
 # ---------------------------------------------------------------------------
 # Distro packages (.deb / .rpm) — BINARY, via the install.sh wrapper.

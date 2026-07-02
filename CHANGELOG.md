@@ -42,6 +42,15 @@ following [Semantic Versioning](https://semver.org/).
   can run), and a pre-approval left behind by a failed `helper-1` hand-off
   is dropped so a later auth can't claim it.
 
+### Changed
+
+- **Bumped the cxx-qt stack to 0.9** (`cxx-qt`, `cxx-qt-lib`,
+  `cxx-qt-lib-extras`, `cxx-qt-build`). No source changes were needed,
+  but cxx-qt-build 0.9 no longer auto-discovers Qt: the helper build now
+  requires `QMAKE` to point at the system `qmake6`. CI, `install.sh`, and
+  `scripts/release-local.sh` set/detect it automatically; local builds
+  need `QMAKE=$(command -v qmake6)`.
+
 ### Added
 
 - **`remember_scope = "command" | "program"`** (`[general]` or per

@@ -252,6 +252,11 @@ jobs:
     name: build helper (Qt6 / KF6)
     runs-on: ubuntu-latest
     container: registry.opensuse.org/opensuse/tumbleweed:latest
+    # cxx-qt-build 0.9 no longer auto-discovers Qt on openSUSE — point it at
+    # the system qmake6 (qt6-base-devel installs it here) or the build script
+    # panics with "Could not find Qt".
+    env:
+      QMAKE: /usr/bin/qmake6
     steps:
       - name: Install toolchain + Qt/KF6 deps
         # mold too, to satisfy the workflow-level RUSTFLAGS link-arg.
