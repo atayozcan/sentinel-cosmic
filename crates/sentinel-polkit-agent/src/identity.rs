@@ -8,11 +8,26 @@ use zvariant::OwnedValue;
 
 pub type Identity = (String, HashMap<String, OwnedValue>);
 
-/// Pick the best identity to authenticate as. Strategy: prefer the
-/// non-root unix-user matching the calling process's uid; fall back to the
-/// first unix-user; otherwise return None.
+/// Pick the identity to authenticate as: the `unix-user` whose uid is the
+/// agent's own (the logged-in user). Returns `None` if the running user is
+/// not among polkit's offered identities.
+///
+/// # Why not fall back to the first offered identity
+///
+/// Sentinel replaces polkit's password prompt with a confirmation dialog,
+/// so authenticating "as" an identity means: one Allow click grants it.
+/// Authenticating as an identity the user *doesn't own* would therefore let
+/// a single click satisfy an `auth_admin` action as root/another admin with
+/// no credential — defeating the very gate polkit is asking about.
+///
+/// This is not a limitation in practice: `install.sh` installs a polkit
+/// admin rule making the logged-in user an administrator, so polkit always
+/// offers that user's own uid for the actions they can perform, and the
+/// match below succeeds. When the running user is genuinely *not* an
+/// eligible identity, declining (→ the agent errors → polkit falls back to
+/// a password) is the correct, fail-closed outcome — the same fallback the
+/// installer documents for a system without the admin rule.
 pub fn pick(identities: &[Identity], own_uid: u32) -> Option<u32> {
-    let mut first_unix_user: Option<u32> = None;
     for (kind, details) in identities {
         if kind != "unix-user" {
             continue;
@@ -26,11 +41,8 @@ pub fn pick(identities: &[Identity], own_uid: u32) -> Option<u32> {
         if uid == own_uid {
             return Some(uid);
         }
-        if first_unix_user.is_none() {
-            first_unix_user = Some(uid);
-        }
     }
-    first_unix_user
+    None
 }
 
 #[cfg(test)]
@@ -57,9 +69,13 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_first_unix_user_if_no_uid_match() {
-        let ids = vec![unix_user(1000), unix_user(1001)];
-        assert_eq!(pick(&ids, 9999), Some(1000));
+    fn fails_closed_when_own_uid_absent() {
+        // The running user isn't among the offered identities (e.g. an
+        // auth_admin action on a system where this user isn't an admin).
+        // We must NOT authenticate as someone else — decline instead, so a
+        // single Allow click can't stand in for an admin credential.
+        let ids = vec![unix_user(0), unix_user(1001)];
+        assert_eq!(pick(&ids, 9999), None);
     }
 
     #[test]
