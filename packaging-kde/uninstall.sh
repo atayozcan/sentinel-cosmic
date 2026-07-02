@@ -118,7 +118,8 @@ for uid in /run/user/*; do
     user_systemctl "$uid" start plasma-polkit-agent.service
 done
 
-FALLBACK_PATHS=(
+# Files Sentinel wholly owns — safe to restore-or-remove outright.
+FALLBACK_OWNED=(
     "/usr/lib64/security/pam_sentinel.so"
     "/usr/lib/security/pam_sentinel.so"
     "$PREFIX/$LIBEXECDIR/sentinel-helper-kde"
@@ -127,10 +128,6 @@ FALLBACK_PATHS=(
     "$PREFIX/lib/systemd/user/sentinel-polkit-agent.service"
     "$SYSCONFDIR/systemd/system/sentinel-broker.service"
     "$SYSCONFDIR/security/sentinel.conf"
-    "$SYSCONFDIR/pam.d/polkit-1"
-    "$SYSCONFDIR/pam.d/sudo"
-    "$SYSCONFDIR/pam.d/sudo-i"
-    "$SYSCONFDIR/pam.d/su"
     "$SYSCONFDIR/sudoers.d/sentinel-timestamp"
     "$SYSCONFDIR/polkit-1/rules.d/49-sentinel-admin.rules"
     "$PREFIX/share/dbus-1/system.d/org.sentinel.Agent.conf"
@@ -144,7 +141,7 @@ FALLBACK_PATHS=(
     "$PREFIX/share/fish/vendor_completions.d/sentinel-polkit-agent.fish"
     "$PREFIX/share/zsh/site-functions/_sentinel-polkit-agent"
 )
-for p in "${FALLBACK_PATHS[@]}"; do
+for p in "${FALLBACK_OWNED[@]}"; do
     if [[ -e "$p" ]]; then
         if [[ -f "${p}.pre-sentinel.bak" ]]; then
             mv -f -- "${p}.pre-sentinel.bak" "$p" && info "Restored $p from backup"
@@ -152,6 +149,33 @@ for p in "${FALLBACK_PATHS[@]}"; do
             rm -f -- "$p" && info "Removed $p"
         fi
     fi
+done
+
+# Distro PAM stacks Sentinel only EDITED in place (prepended one line).
+# These belong to the distro, not us — deleting one locks out that
+# service. So: restore the backup if we have it; otherwise strip just our
+# line if present; and NEVER remove the file. A file with no backup and no
+# Sentinel line is left untouched (it was never ours to begin with).
+FALLBACK_SHARED_PAM=(
+    "$SYSCONFDIR/pam.d/polkit-1"
+    "$SYSCONFDIR/pam.d/sudo"
+    "$SYSCONFDIR/pam.d/sudo-i"
+    "$SYSCONFDIR/pam.d/su"
+)
+for p in "${FALLBACK_SHARED_PAM[@]}"; do
+    [[ -e "$p" ]] || continue
+    if [[ -f "${p}.pre-sentinel.bak" ]]; then
+        mv -f -- "${p}.pre-sentinel.bak" "$p" && info "Restored $p from backup"
+    elif grep -q 'pam_sentinel\.so' "$p" 2>/dev/null; then
+        # No backup, but our line is here — remove just that line, leaving
+        # the distro's own stack intact.
+        if sed -i '/pam_sentinel\.so/d' "$p"; then
+            info "Stripped Sentinel line from $p (no backup found)"
+        else
+            warn "Could not strip Sentinel line from $p — leaving as-is"
+        fi
+    fi
+    # else: not ours (no backup, no Sentinel line) — leave it completely alone.
 done
 rm -rf -- /run/sentinel 2>/dev/null || true   # legacy runtime dir from older installs
 systemctl daemon-reload 2>/dev/null || true
