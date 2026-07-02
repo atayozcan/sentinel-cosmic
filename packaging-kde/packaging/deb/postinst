@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Atay Özcan <atay@oezcan.me>
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Sentinel-KDE .deb post-install. The package ships a prebuilt bundle
 # tarball; we extract it and run the tested, distro-adaptive install.sh
 # (which wires polkit-1 against THIS distro's PAM stack, installs the

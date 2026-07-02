@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Atay Özcan <atay@oezcan.me>
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Sentinel-KDE .rpm %post — extract the shipped bundle and run the tested,
 # distro-adaptive install.sh (polkit-only; --no-sudo). Runs on install and
 # upgrade ($1 = 1 or 2); install.sh reverts any prior state itself.

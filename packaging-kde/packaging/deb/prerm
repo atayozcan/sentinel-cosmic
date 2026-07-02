@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Atay Özcan <atay@oezcan.me>
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Sentinel-KDE .deb pre-remove. Revert the install.sh wiring on final
 # removal. On upgrade we do nothing — the new package's postinst runs
 # install.sh, which reverts the prior state itself before reinstalling.
