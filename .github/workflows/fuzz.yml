@@ -26,7 +26,7 @@ jobs:
       matrix:
         target: [verdict_parse, strip_elevation, format_message]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install nightly + cargo-fuzz
         run: |
           rustup toolchain install nightly --profile minimal
@@ -39,7 +39,7 @@ jobs:
           -print_final_stats=1
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-artifacts-${{ matrix.target }}
           path: fuzz/artifacts/
