@@ -49,8 +49,8 @@ backup=('etc/security/sentinel.conf' 'etc/pam.d/polkit-1')
 _base="$url/releases/download/v$pkgver"
 source_x86_64=("$pkgname-$pkgver-x86_64.tar.gz::$_base/sentinel-kde-$pkgver-x86_64-linux.tar.gz")
 source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::$_base/sentinel-kde-$pkgver-aarch64-linux.tar.gz")
-sha256sums_x86_64=('SKIP')
-sha256sums_aarch64=('SKIP')
+sha256sums_x86_64=('e7e0e71a6fb2bd07a0208f9bbb5dc83c6048d4a4172bf138b96372358bcfb29b')
+sha256sums_aarch64=('40d43b19a9c52842e07a83d205f7f0744f8fa7bdfc204f71920a8e31f7fc0260')
 
 package() {
     cd "sentinel-kde-$pkgver"
