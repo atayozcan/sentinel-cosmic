@@ -5,11 +5,14 @@
 # scripts/release-local.sh — fully-local, reproducible release matrix.
 #
 # Replaces the GitHub release workflow. Builds + packages on two machines
-# you control (no CI):
-#   * THIS host  — native build for its own arch (aarch64 on `orion`).
-#   * $ASUS_HOST — native build for x86_64, and `makepkg` for BOTH arches
-#                  (Arch `.pkg.tar.zst` is just packaging prebuilt binaries,
-#                  so it cross-packages fine with CARCH set).
+# you control (no CI), starting from EITHER one:
+#   * THIS host  — native build for its own arch (asus = x86_64,
+#                  orion = aarch64).
+#   * $PEER_HOST — native build for the other arch, driven over ssh
+#                  (auto-detected: asus <-> orion).
+#   * `makepkg` runs for BOTH arches on whichever host has it (Arch
+#     `.pkg.tar.zst` is just packaging prebuilt binaries, so it
+#     cross-packages fine with CARCH set).
 #
 # Per arch it emits:  .pkg.tar.zst (Arch) · .deb · .rpm · prebuilt bundle
 # tarball + .sha256.  The AUR `sentinel-kde` PKGBUILD is binary (sources the
@@ -29,7 +32,14 @@
 set -Eeuo pipefail
 
 # ---- config (env-overridable) ---------------------------------------------
-ASUS_HOST="${ASUS_HOST:-asus}"
+# The matrix spans two build hosts; whichever one it starts on builds its
+# native arch and drives the other over ssh.
+LOCAL_ARCH="$(uname -m)"
+case "$LOCAL_ARCH" in
+    x86_64)  PEER_ARCH="aarch64"; PEER_HOST="${PEER_HOST:-orion}" ;;
+    aarch64) PEER_ARCH="x86_64";  PEER_HOST="${PEER_HOST:-asus}" ;;
+    *)       PEER_ARCH=""; PEER_HOST="${PEER_HOST:-}" ;;  # setup_repro_env dies
+esac
 REMOTE_REPO="${REMOTE_REPO:-/home/atay/Projects/sentinel}"
 REPRO_TOOLCHAIN="${REPRO_TOOLCHAIN:-1.96.0}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -151,9 +161,9 @@ case "${1:-}" in
         setup_repro_env; pkg_arch "$2" "$DIST/sentinel-kde-$VERSION"; exit 0 ;;
     --worker)            # build+package this host's native arch (used over ssh)
         mkdir -p "$DIST"; build_bundle; pkg_deb_rpm
-        [ "$(uname -m)" = x86_64 ] && command -v makepkg >/dev/null && {
-            tar -C "$DIST" -xzf "$DIST/sentinel-kde-$VERSION-x86_64-linux.tar.gz"
-            pkg_arch x86_64 "$DIST/sentinel-kde-$VERSION"; }
+        command -v makepkg >/dev/null && {
+            tar -C "$DIST" -xzf "$DIST/sentinel-kde-$VERSION-$LOCAL_ARCH-linux.tar.gz"
+            pkg_arch "$LOCAL_ARCH" "$DIST/sentinel-kde-$VERSION"; }
         exit 0 ;;
     --arch)              # local single-arch build (testing)
         mkdir -p "$DIST"; build_bundle; pkg_deb_rpm; exit 0 ;;
@@ -169,24 +179,33 @@ esac
 
 # ---- full matrix orchestration --------------------------------------------
 mkdir -p "$DIST"
-c "Sentinel $VERSION — local release matrix"
-# Fail before the (long) local build if the x86_64 worker is unreachable.
-ssh -o ConnectTimeout=5 -o BatchMode=yes "$ASUS_HOST" true 2>/dev/null \
-    || die "worker $ASUS_HOST unreachable over ssh — full matrix needs it (or run --arch for this host only)"
+c "Sentinel $VERSION — local release matrix ($LOCAL_ARCH here, $PEER_ARCH on $PEER_HOST)"
+# Fail before the (long) local build if the peer worker is unreachable.
+ssh -o ConnectTimeout=5 -o BatchMode=yes "$PEER_HOST" true 2>/dev/null \
+    || die "worker $PEER_HOST unreachable over ssh — full matrix needs it (or run --arch for this host only)"
 
-c "[1/4] aarch64 (this host)"; build_bundle; pkg_deb_rpm
+c "[1/4] $LOCAL_ARCH (this host)"; build_bundle; pkg_deb_rpm
 
-c "[2/4] x86_64 (+ both .pkg) on $ASUS_HOST"
+c "[2/4] $PEER_ARCH on $PEER_HOST"
 git push -q origin HEAD 2>/dev/null || true
-ssh "$ASUS_HOST" "cd $REMOTE_REPO && git fetch -q origin && git checkout -q $(git rev-parse HEAD) && scripts/release-local.sh --worker"
+ssh "$PEER_HOST" "cd $REMOTE_REPO && git fetch -q origin && git checkout -q $(git rev-parse HEAD) && scripts/release-local.sh --worker"
 
-c "[3/4] collect x86_64 artefacts + cross-package aarch64 .pkg"
-scp -q "$ASUS_HOST:$REMOTE_REPO/dist/*x86_64*" "$ASUS_HOST:$REMOTE_REPO/dist/*.pkg.tar.zst" "$DIST/" 2>/dev/null || true
-# aarch64 .pkg: send our bundle to asus, makepkg there, pull back.
-scp -q "$DIST/sentinel-kde-$VERSION-aarch64-linux.tar.gz" "$ASUS_HOST:$REMOTE_REPO/dist/" 2>/dev/null
-ssh "$ASUS_HOST" "cd $REMOTE_REPO && tar -C dist -xzf dist/sentinel-kde-$VERSION-aarch64-linux.tar.gz && \
-    SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) scripts/release-local.sh --pkg-arch aarch64" 2>/dev/null || true
-scp -q "$ASUS_HOST:$REMOTE_REPO/dist/*aarch64*.pkg.tar.zst" "$DIST/" 2>/dev/null || true
+c "[3/4] collect $PEER_ARCH artefacts + .pkg for any arch still missing one"
+scp -q "$PEER_HOST:$REMOTE_REPO/dist/*$PEER_ARCH*" "$PEER_HOST:$REMOTE_REPO/dist/"'*.pkg.tar.zst' "$DIST/" 2>/dev/null || true
+# makepkg cross-packages either arch; run it wherever it exists (local wins).
+pkgrel="$(sed -n 's/^pkgrel=//p' packaging-kde/packaging/arch/PKGBUILD)"
+for a in x86_64 aarch64; do
+    [ -f "$DIST/sentinel-kde-$VERSION-${pkgrel:-1}-$a.pkg.tar.zst" ] && continue
+    if command -v makepkg >/dev/null 2>&1; then
+        tar -C "$DIST" -xzf "$DIST/sentinel-kde-$VERSION-$a-linux.tar.gz"
+        pkg_arch "$a" "$DIST/sentinel-kde-$VERSION"
+    else
+        scp -q "$DIST/sentinel-kde-$VERSION-$a-linux.tar.gz" "$PEER_HOST:$REMOTE_REPO/dist/" 2>/dev/null
+        ssh "$PEER_HOST" "cd $REMOTE_REPO && tar -C dist -xzf dist/sentinel-kde-$VERSION-$a-linux.tar.gz && \
+            SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) scripts/release-local.sh --pkg-arch $a" 2>/dev/null || true
+        scp -q "$PEER_HOST:$REMOTE_REPO/dist/*$a*.pkg.tar.zst" "$DIST/" 2>/dev/null || true
+    fi
+done
 
 c "[4/4] checksums + manifest"
 ( cd "$DIST" && for f in *.pkg.tar.zst *.deb *.rpm; do [ -f "$f" ] && sha256sum "$f" > "$f.sha256"; done; ls -1 )
