@@ -160,7 +160,9 @@ case "${1:-}" in
         [ -n "${2:-}" ] || die "usage: --pkg-arch <arch>"
         setup_repro_env; pkg_arch "$2" "$DIST/sentinel-kde-$VERSION"; exit 0 ;;
     --worker)            # build+package this host's native arch (used over ssh)
-        mkdir -p "$DIST"; build_bundle; pkg_deb_rpm
+        # The worker's dist/ is scratch — start clean so the orchestrator's
+        # collect globs can't pick up a previous release's artefacts.
+        rm -rf "$DIST"; mkdir -p "$DIST"; build_bundle; pkg_deb_rpm
         command -v makepkg >/dev/null && {
             tar -C "$DIST" -xzf "$DIST/sentinel-kde-$VERSION-$LOCAL_ARCH-linux.tar.gz"
             pkg_arch "$LOCAL_ARCH" "$DIST/sentinel-kde-$VERSION"; }
@@ -191,7 +193,13 @@ git push -q origin HEAD 2>/dev/null || true
 ssh "$PEER_HOST" "cd $REMOTE_REPO && git fetch -q origin && git checkout -q $(git rev-parse HEAD) && scripts/release-local.sh --worker"
 
 c "[3/4] collect $PEER_ARCH artefacts + .pkg for any arch still missing one"
-scp -q "$PEER_HOST:$REMOTE_REPO/dist/*$PEER_ARCH*" "$PEER_HOST:$REMOTE_REPO/dist/"'*.pkg.tar.zst' "$DIST/" 2>/dev/null || true
+# Debian spells the arches amd64/arm64, so a bare *$PEER_ARCH* glob misses
+# the .deb; and every glob is scoped to $VERSION so a stale dist/ on the
+# peer can't leak old artefacts into this release.
+deb_arch=amd64; [ "$PEER_ARCH" = aarch64 ] && deb_arch=arm64
+scp -q "$PEER_HOST:$REMOTE_REPO/dist/*$VERSION*$PEER_ARCH*" \
+       "$PEER_HOST:$REMOTE_REPO/dist/*$VERSION*$deb_arch*" \
+       "$PEER_HOST:$REMOTE_REPO/dist/*$VERSION*.pkg.tar.zst" "$DIST/" 2>/dev/null || true
 # makepkg cross-packages either arch; run it wherever it exists (local wins).
 pkgrel="$(sed -n 's/^pkgrel=//p' packaging-kde/packaging/arch/PKGBUILD)"
 for a in x86_64 aarch64; do
@@ -203,9 +211,10 @@ for a in x86_64 aarch64; do
         scp -q "$DIST/sentinel-kde-$VERSION-$a-linux.tar.gz" "$PEER_HOST:$REMOTE_REPO/dist/" 2>/dev/null
         ssh "$PEER_HOST" "cd $REMOTE_REPO && tar -C dist -xzf dist/sentinel-kde-$VERSION-$a-linux.tar.gz && \
             SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) scripts/release-local.sh --pkg-arch $a" 2>/dev/null || true
-        scp -q "$PEER_HOST:$REMOTE_REPO/dist/*$a*.pkg.tar.zst" "$DIST/" 2>/dev/null || true
+        scp -q "$PEER_HOST:$REMOTE_REPO/dist/*$VERSION*$a*.pkg.tar.zst" "$DIST/" 2>/dev/null || true
     fi
 done
+rm -rf "$DIST/sentinel-kde-$VERSION"   # extracted-bundle scratch dir
 
 c "[4/4] checksums + manifest"
 ( cd "$DIST" && for f in *.pkg.tar.zst *.deb *.rpm; do [ -f "$f" ] && sha256sum "$f" > "$f.sha256"; done; ls -1 )
