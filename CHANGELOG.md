@@ -8,10 +8,25 @@ The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), with version numbers
 following [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.14.0] — 2026-07-05
 
 ### Fixed
 
+- **polkit path: an auth for another identity can no longer be satisfied
+  by a single click.** When the running user's own uid wasn't among the
+  identities polkit offered, `identity::pick` fell back to the first
+  offered unix-user — so one Allow click could satisfy an `auth_admin`
+  action as root/another admin with no credential. It now fails closed:
+  if the running user's uid isn't offered, the agent declines and polkit
+  falls back to its password prompt. Non-breaking in practice, since
+  `install.sh` makes the logged-in user a polkit administrator.
+- **`uninstall.sh` can no longer delete a distro PAM stack.** In the
+  state-file-less fallback, a shared PAM stack (`polkit-1`, `sudo`,
+  `sudo-i`, `su`) with no `.pre-sentinel.bak` backup was removed
+  outright — which can lock the user out of that service (e.g. no more
+  sudo auth). The fallback now restores the backup if present, else
+  strips only Sentinel's `pam_sentinel.so` line, and never deletes the
+  file. Sentinel-owned files are still restore-or-remove.
 - **The "remember" checkbox is no longer offered for requests that can
   never be remembered** (`sudo -v`, `su`, shells and other ineligible
   gateways) on the terminal path. Previously the dialog showed the
